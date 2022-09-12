@@ -1,94 +1,117 @@
 // SPDX-License-Identifier: GPL-3.0
-
 pragma solidity >=0.7.0 <0.9.0;
 
 contract Election {
-    address public Election_Comissioner;
-    address payable[] public Participants;
-    mapping (address=>bool) verify_Participants;
-    address[] public voters;
-    mapping(address=>bool) verify_voters;
-    uint public No_of_vote_P1;
-    uint public No_of_vote_P2;
 
-    // Declare Election Comissioner
-    constructor(){
-       Election_Comissioner=msg.sender; 
+    address public admin;
+    uint public campaingn_counter;
+    uint public winnerGetvotes;
+
+    constructor (address admin_) {
+        admin = admin_;
     }
 
-    // Become a Participant
-    receive() external payable {
-        require(msg.sender!=Election_Comissioner,"You can not Participate.");
-        require(verify_Participants[msg.sender]==false,"You have already participated");
-        require(Participants.length<2,"Participants limit reached.");
-        require(msg.value==5 ether,"Minimum 2 eher require to participate in Election.");
-        Participants.push(payable(msg.sender));
-        verify_Participants[msg.sender]=true; 
+    struct Campaingn {
+        uint totalVotes;
+        uint startTime;
+        uint endTime;
+        address winner;
+        mapping (address => bool) isVoted;
+        mapping (address => bool) isAppliedForParticipation;
+        mapping (address => bool) isWhitelistedForParticipation;
+        mapping (address => uint) participantVotes;
     }
 
-    // Check Contract Balance
-    function Get_Balance() public view returns(uint){
-        require(msg.sender==Election_Comissioner,"Only Election Comissioner can access the Balance");
-        return address(this).balance;
+    mapping (address => bool) isAppliedForVoting;
+    mapping (address => bool) isWhitelistedForVoting;
+
+    mapping (uint => Campaingn) campaigns;
+
+    modifier isAdmin {
+        require (msg.sender == admin,"Caller Is Not Owner");
+        _;
     }
 
-    // vote to Participant-1
-    function vote_p1() public{
-        require(Participants.length==2,"There is not enough participants.");
-        require(verify_voters[msg.sender]==false,"you have already voted.");
-        No_of_vote_P1++;
-        voters.push(msg.sender);
-        verify_voters[msg.sender]=true;
+    function startCampaign(uint endTime_) external isAdmin returns(bool) {
+        campaingn_counter += 1;
+        campaigns[campaingn_counter].startTime = block.timestamp;
+        campaigns[campaingn_counter].endTime = campaigns[campaingn_counter].startTime + endTime_;
+        return true;
+    }
+
+    modifier checkTime(){
+        require(block.timestamp>campaigns[campaingn_counter].startTime && block.timestamp<campaigns[campaingn_counter].endTime,"Either campaign is not started yet or Campaign time is over");
+        _;
+    }
+
+    function applyForParticipation(address _participant) public checkTime{
+        require(campaigns[campaingn_counter].isAppliedForParticipation[_participant]==false,"you have been already applied.");
+        campaigns[campaingn_counter].isAppliedForParticipation[_participant]=true;
+    }
+
+    function whitelistedForParticipation(address _participant) public checkTime isAdmin{
+        require(campaigns[campaingn_counter].isAppliedForParticipation[_participant]==true,"participant has not applied for participation.");
+        require(campaigns[campaingn_counter].isWhitelistedForParticipation[_participant]==false,"Participant has been already whitelisted.");
+        campaigns[campaingn_counter].isWhitelistedForParticipation[_participant]=true;
+    }
+
+    function applyForVoting(address _voter) public checkTime{
+        require(isAppliedForVoting[_voter]==false,"you have been already applied.");
+        isAppliedForVoting[_voter]=true;
+    }
+
+    function whiteListedForVoting(address _voter) public checkTime isAdmin{
+        require(isAppliedForVoting[_voter]==true,"voter has not applied for voting.");
+        require(isWhitelistedForVoting[_voter]==false,"voter has been already whitelisted.");
+        isWhitelistedForVoting[_voter]=true;
+    }
+
+    modifier isChecked(address _participant){
+        require(isWhitelistedForVoting[msg.sender]==true,"voter is not whitelisted for voting.");
+        require(campaigns[campaingn_counter].isWhitelistedForParticipation[_participant]==true,"participant is not whitelisted for participation.");
+        require(campaigns[campaingn_counter].isVoted[msg.sender]==false,"you have been already voted.");
+        _;
+    }
+
+    function giveVote(address _participant) public checkTime isChecked(_participant){
+        uint temp;
+
+        campaigns[campaingn_counter].participantVotes[_participant]+=1;
+        campaigns[campaingn_counter].isVoted[msg.sender]=true;
+        campaigns[campaingn_counter].totalVotes++;
+
+        temp=campaigns[campaingn_counter].participantVotes[_participant];
+
+        if(temp>winnerGetvotes){
+            campaigns[campaingn_counter].winner=_participant;
+            winnerGetvotes=temp;
+        }
+    }
+
+    function declareWinner() public view returns(address winner) {
+        return (campaigns[campaingn_counter].winner);
+    }
+
+    function campaingnData(uint campaingnNo) public view
+    returns(uint totalVotes,uint startTime,uint endTime,address Winner)
+    {
+        return (
+            campaigns[campaingnNo].totalVotes,
+            campaigns[campaingnNo].startTime,
+            campaigns[campaingnNo].endTime,
+            campaigns[campaingnNo].winner
+        );    
     }  
 
-    // vote to Participant-2
-    function vote_p2() public{
-        require(Participants.length==2,"There is not enough participants.");
-        require(verify_voters[msg.sender]==false,"you have already voted.");
-        No_of_vote_P2++;
-        voters.push(msg.sender);
-        verify_voters[msg.sender]=true;
+    function campaignsVerificationData(uint campaingnNo,address _person) public view 
+    returns(bool AppliedForVoting,bool WhitelistedForVoting,bool AppliedForParticipation,bool WhitelistedForParticipation,bool Voted)
+    {
+        return (
+            isAppliedForVoting[_person],
+            isWhitelistedForVoting[_person], 
+            campaigns[campaingnNo].isAppliedForParticipation[_person],
+            campaigns[campaingnNo].isWhitelistedForParticipation[_person],    
+            campaigns[campaingnNo].isVoted[_person]      
+        );
     }
-
-    // Check voters have been voted or not
-    function check() public view returns(bool){
-        bool i;
-        i=verify_voters[msg.sender];
-        return i;
-    }
-
-    // Calculate total number of voters
-    function total_voters() public view returns(uint){
-        uint num;
-        num=voters.length;
-        return num;
-    } 
-
-    // Declare the Winner of Election
-    function Winner() public view returns(address){
-        require(msg.sender==Election_Comissioner,"Only Election Commisioner can declare the winner");
-        require(No_of_vote_P1>No_of_vote_P2||No_of_vote_P1<No_of_vote_P2,"Both Candidate get Equal votes, so Re-voting is required.");
-        
-        address temp;
-        if(No_of_vote_P1>No_of_vote_P2){
-            temp=Participants[0];
-        }
-        else{
-            temp=Participants[1];
-        } 
-        return temp;
-    }
-
-    // Pay Contarct balance to Election Winner
-    function pay_to_Winner() public{
-        require(msg.sender==Election_Comissioner,"Only Election Comissioner have rights to pay winner.");
-        payable(Winner()).transfer(Get_Balance());
-    }
-    
 }
-
-contract A is Election{}
-
-contract B is Election{}
-
-contract C is Election{}
